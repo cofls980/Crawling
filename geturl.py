@@ -86,9 +86,10 @@ def fill_check_video_list():
         ui.data.first_start = False
         ui.data.check_video_list = {}
         for i in range(len(ui.data.df_live)):
-            # if find_video(df_live.loc[i]['채널명'], df_live.loc[i]['영상 아이디'], df_view_like) == -1:
-            ui.data.check_video_list[(ui.data.df_live.loc[i]['채널명'], ui.data.df_live.loc[i]['영상 제목'],
-                                      ui.data.df_live.loc[i]['영상 아이디'])] = False
+            if find_video_row_index(ui.data.df_live.loc[i]['채널명'], ui.data.df_live.loc[i]['영상 아이디'],
+                                    ui.data.df_view_like) == -1:
+                ui.data.check_video_list[(ui.data.df_live.loc[i]['채널명'], ui.data.df_live.loc[i]['영상 제목'],
+                                          ui.data.df_live.loc[i]['영상 아이디'])] = False
     for key, value in ui.data.check_video_list.items():
         ui.data.check_video_list[key] = False
 
@@ -176,54 +177,91 @@ def live_scraping(parsing, data, channel_name, column_name):
                                 data.df_live.loc[len(data.df_live)] = insert_values
                     break
             break
-    # return data.df_live
 
 
 def view_like_scraping(video_info, parsing):
-    # f = open('test.txt', 'w', newline='', encoding='utf-16')
-    f = open('test.txt', 'a', newline='', encoding='utf-16')
+    # f = open('test.txt', 'a', newline='', encoding='utf-16')
+    like_cnt = -1
+    view_cnt = -1
     for line in parsing:
         if 'ytInitialData' in line:
             line = line.strip('var ytInitialData = ').strip(';')
-            # line = line.strip(';')
             json_object = json.loads(line)
+            if json_object.get('contents') is None:
+                continue
+            if json_object.get('contents').get('twoColumnWatchNextResults') is None:
+                continue
+            if json_object.get('contents').get('twoColumnWatchNextResults').get('results') is None:
+                continue
+            if json_object.get('contents').get('twoColumnWatchNextResults').get('results').get('results') is None:
+                continue
+            if json_object.get('contents').get('twoColumnWatchNextResults').get('results').get('results').get(
+                    'contents') is None:
+                continue
             contents = json_object.get('contents').get('twoColumnWatchNextResults').get('results').get('results').get(
                 'contents')
             for content in contents:
                 if '좋아요' in str(content):
-                    # 제목
-                    f.write(video_info[1] + '\n\n\n\n')
-                    f.write(video_info[2] + '\n\n\n\n')
+                    if content.get('videoPrimaryInfoRenderer') is None:
+                        continue
                     content = content.get('videoPrimaryInfoRenderer')
-                    # 조회수
+                    if content.get('viewCount') is None:
+                        continue
+                    if content.get('viewCount').get('videoViewCountRenderer') is None:
+                        continue
+                    if content.get('viewCount').get('videoViewCountRenderer').get('viewCount') is None:
+                        continue
                     views = content.get('viewCount').get('videoViewCountRenderer').get('viewCount')
+                    if views.get('simpleText') is None:
+                        continue
                     if '조회수' not in str(views):
                         break
                     views = views.get('simpleText')
-                    f.write(str(views) + '\n\n\n\n')
                     view_cnt = str(views)[4:]
                     view_cnt = int(view_cnt[:view_cnt.find('회')].replace(',', ''))
-                    f.write(str(view_cnt) + '\n\n\n\n')
+                    if content.get('videoActions') is None:
+                        continue
+                    if content.get('videoActions').get('menuRenderer') is None:
+                        continue
+                    if content.get('videoActions').get('menuRenderer').get('topLevelButtons') is None:
+                        continue
                     items = content.get('videoActions').get('menuRenderer').get('topLevelButtons')
-                    for like_cnt in items:
-                        if '좋아요' in str(like_cnt):
-                            # 좋아요 수
-                            like_cnt = like_cnt.get('segmentedLikeDislikeButtonRenderer').get('likeButton').get(
-                                'toggleButtonRenderer').get('defaultText').get('accessibility').get(
-                                'accessibilityData').get('label')
-                            like_cnt = int(str(like_cnt)[4:str(like_cnt).find('개')].replace(',', ''))
-                            f.write(str(like_cnt) + '\n\n\n\n')
-                            row_index = len(ui.data.df_view_like)
-                            ui.data.df_view_like.loc[row_index, '채널명'] = video_info[0]
-                            ui.data.df_view_like.loc[row_index, '영상 제목'] = video_info[1]
-                            ui.data.df_view_like.loc[row_index, '영상 아이디'] = video_info[2]
-                            ui.data.df_view_like.loc[row_index, '조회수'] = view_cnt
-                            ui.data.df_view_like.loc[row_index, '좋아요 수'] = like_cnt
-                            # view_like도 인덱스 만들기
+                    for item in items:
+                        if '좋아요' in str(item):
+                            if item.get('segmentedLikeDislikeButtonRenderer') is None:
+                                continue
+                            like1 = item.get('segmentedLikeDislikeButtonRenderer')
+                            if like1.get('likeButton') is None:
+                                continue
+                            if like1.get('likeButton').get('toggleButtonRenderer') is None:
+                                continue
+                            like2 = like1.get('likeButton').get('toggleButtonRenderer')
+                            if like2.get('defaultText') is None:
+                                continue
+                            if like2.get('defaultText').get('accessibility') is None:
+                                continue
+                            like3 = like2.get('defaultText').get('accessibility')
+                            if like3.get('accessibilityData') is None:
+                                continue
+                            if like3.get('accessibilityData').get('label') is None:
+                                continue
+                            item = like3.get('accessibilityData').get('label')
+                            like_cnt = int(str(item)[4:str(item).find('개')].replace(',', ''))
                         break
                     break
-            f.close()
             break
+    row_index = len(ui.data.df_view_like)
+    ui.data.df_view_like.loc[row_index, '채널명'] = video_info[0]
+    ui.data.df_view_like.loc[row_index, '영상 제목'] = video_info[1]
+    ui.data.df_view_like.loc[row_index, '영상 아이디'] = video_info[2]
+    if view_cnt == -1:
+        ui.data.df_view_like.loc[row_index, '조회수'] = '정보없음'
+    else:
+        ui.data.df_view_like.loc[row_index, '조회수'] = view_cnt
+    if like_cnt == -1:
+        ui.data.df_view_like.loc[row_index, '좋아요 수'] = '정보없음'
+    else:
+        ui.data.df_view_like.loc[row_index, '좋아요 수'] = like_cnt
 
 
 def manage_ended_videos():
@@ -239,11 +277,13 @@ def manage_ended_videos():
     for e in end_video:
         print(e)
         parsing = crawling(e[0] + '(' + e[1] + ')', 'https://youtube.com/' + e[2])
-        if parsing is None:  # 페이지가 지워졌을 때는 엑셀에 어떻게 표시할지 생각해보자 - 그냥 비워 둘까
+        if parsing is None:
+            print_in_list_box(e[0] + '(' + e[1] + ') - 알 수 없는 페이지')
             continue
         view_like_scraping(e, parsing)
-        ui.data.df_view_like.to_excel(ui.data.real_view_like_name + str(ui.data.view_like_index) + '.xlsx', index=False)
         ui.data.check_video_list.pop(e)
+    ui.data.df_view_like.to_excel(ui.data.real_view_like_name + str(ui.data.view_like_index) + '.xlsx', index=False)
+    print_in_list_box(ui.data.real_view_like_name + str(ui.data.view_like_index) + '.xlsx')
 
 
 def run():
@@ -268,14 +308,18 @@ def run():
         live_scraping(parsing, ui.data, ui.data.channel_list_names[x], curr_time)
     ui.data.live_index = ui.data.live_index + 1
     ui.data.df_live.to_excel(ui.data.real_live_name + str(ui.data.live_index) + '.xlsx', index=False)
-    print_in_list_box(ui.data.today + '_' + str(ui.data.live_index) + '.xlsx')
-    print('총 실행 시간: %s 초' % (time.time() - start))
+    print_in_list_box(ui.data.real_live_name + str(ui.data.live_index) + '.xlsx')
+    sub_time = time.time() - start
+    print('총 실행 시간: %s 초' % sub_time)
     print("======================= END =======================")
-    # manage_ended_videos()
+
+    ui.data.time_sum = ui.data.time_sum + sub_time
+    ui.data.time_cnt = ui.data.time_cnt + 1
     threading.Timer(0, manage_ended_videos).start()
 
     global run_thread
-    timer = (60 * int(ui.data.time_term) - (len(ui.data.channel_list_names) // 2) + 2)
+    timer = ui.data.time_sum / ui.data.time_cnt
+    timer = (60 * int(ui.data.time_term) - timer)
     run_thread = threading.Timer(timer, run)
     run_thread.start()
 
@@ -380,6 +424,10 @@ class DATA:
     first_start = True
     check_video_list = {}
     df_view_like = pd.DataFrame()
+
+    # for time average
+    time_sum = 0.0
+    time_cnt = 0
 
 
 class UI:
