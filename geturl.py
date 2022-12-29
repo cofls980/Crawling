@@ -61,17 +61,12 @@ def print_in_list_box(comment):
     ui.box_result_comment.insert(tk.END, '[' + ui.data.today + ' ' + get_curr_time() + '] ' + comment)
 
 
-def open_live_view_like_excel(data):
+def open_live_excel(data):
     if data.live_index != 0:
         df_live = pd.read_excel(ui.data.real_live_name + str(data.live_index) + '.xlsx')
     else:
         df_live = pd.read_excel(ui.data.default_live)
-
-    if data.view_like_index != 0:
-        df_view_like = pd.read_excel(ui.data.real_view_like_name + str(data.view_like_index) + '.xlsx')
-    else:
-        df_view_like = pd.read_excel(ui.data.default_view_like)
-    return df_live, df_view_like
+    return df_live
 
 
 def find_video_row_index(ch_name, video_id, data):
@@ -79,19 +74,6 @@ def find_video_row_index(ch_name, video_id, data):
         if data.loc[i]['채널명'] == ch_name and data.loc[i]['영상 아이디'] == video_id:
             return i
     return -1
-
-
-def fill_check_video_list():
-    if ui.data.first_start:
-        ui.data.first_start = False
-        ui.data.check_video_list = {}
-        for i in range(len(ui.data.df_live)):
-            if find_video_row_index(ui.data.df_live.loc[i]['채널명'], ui.data.df_live.loc[i]['영상 아이디'],
-                                    ui.data.df_view_like) == -1:
-                ui.data.check_video_list[(ui.data.df_live.loc[i]['채널명'], ui.data.df_live.loc[i]['영상 제목'],
-                                          ui.data.df_live.loc[i]['영상 아이디'])] = False
-    for key, value in ui.data.check_video_list.items():
-        ui.data.check_video_list[key] = False
 
 
 # ####################################### utils ###########################################
@@ -145,16 +127,9 @@ def live_scraping(parsing, data, channel_name, column_name):
                         if '시청 중' in str(video.get('viewCountText')):
                             href = str(video.get('navigationEndpoint').get('commandMetadata').
                                        get('webCommandMetadata').get('url'))
+                            href = 'https://youtube.com' + href
                             video_title = (video.get('title').get('runs'))[0].get('text')
                             viewers = (video.get('viewCountText').get('runs'))[0].get('text')
-                            # update video status
-                            dic_keys = list(data.check_video_list.keys())
-                            for key in dic_keys:
-                                if key[2] == href:
-                                    if key[1] != video_title:
-                                        data.check_video_list.pop(key)
-                                    break
-                            data.check_video_list[(channel_name, video_title, href)] = True
                             if '명' in viewers:
                                 viewers = str(viewers)[:str(viewers).find('명')]
                             excel_row_idx = find_video_row_index(channel_name, href, data.df_live)
@@ -179,8 +154,55 @@ def live_scraping(parsing, data, channel_name, column_name):
             break
 
 
+def run():
+    if ui.data.stop:
+        return
+    start = time.time()
+    ui.data.df_live = open_live_excel(ui.data)
+    print("====================== START ======================")
+    curr_time = get_curr_time()
+    ui.data.df_live[curr_time] = 0
+    for x in tqdm(range(len(ui.data.channel_list_urls)), leave=True):
+        if ui.data.stop:
+            return
+        ui.progress_var.set(100 * ((x + 1) / len(ui.data.channel_list_urls)))
+        ui.progress_bar.update()
+        if type(ui.data.channel_list_names[x]) == float:
+            continue
+        if not valid_channel_url_form(ui.data.channel_list_names[x], ui.data.channel_list_urls[x]):
+            continue
+        parsing = crawling(ui.data.channel_list_names[x], ui.data.channel_list_urls[x])
+        if parsing is None:
+            continue
+        live_scraping(parsing, ui.data, ui.data.channel_list_names[x], curr_time)
+    ui.data.live_index = ui.data.live_index + 1
+    ui.data.df_live.to_excel(ui.data.real_live_name + str(ui.data.live_index) + '.xlsx', index=False)
+    print_in_list_box(ui.data.real_live_name + str(ui.data.live_index) + '.xlsx')
+    sub_time = time.time() - start
+    print('총 실행 시간: %s 초' % sub_time)
+    print("======================= END =======================")
+
+    ui.data.time_sum = ui.data.time_sum + sub_time
+    ui.data.time_cnt = ui.data.time_cnt + 1
+
+    goal_time = 60 * int(ui.data.time_term)
+    timer = ui.data.time_sum / ui.data.time_cnt
+    timer = goal_time - timer
+    if timer < 0:
+        timer = 0
+    ui.data.run_thread = threading.Timer(timer, run)
+    ui.data.run_thread.daemon = True
+
+    if ui.data.stop:
+        return
+
+    ui.data.run_thread.start()
+
+
+# ####################################### program ###########################################
+
+# #################################  monitoring program #####################################
 def view_like_scraping(video_info, parsing):
-    # f = open('test.txt', 'a', newline='', encoding='utf-16')
     like_cnt = -1
     view_cnt = -1
     for line in parsing:
@@ -201,6 +223,8 @@ def view_like_scraping(video_info, parsing):
             contents = json_object.get('contents').get('twoColumnWatchNextResults').get('results').get('results').get(
                 'contents')
             for content in contents:
+                if '시청 중' in str(content):
+                    return False
                 if '좋아요' in str(content):
                     if content.get('videoPrimaryInfoRenderer') is None:
                         continue
@@ -262,74 +286,57 @@ def view_like_scraping(video_info, parsing):
         ui.data.df_view_like.loc[row_index, '좋아요 수'] = '정보없음'
     else:
         ui.data.df_view_like.loc[row_index, '좋아요 수'] = like_cnt
+    return True
 
 
-def manage_ended_videos():
-    f = open('test.txt', 'w', newline='', encoding='utf-16')
-    f.close()
-    end_video = []
-    for key, value in ui.data.check_video_list.items():
-        if not value:
-            end_video.append(key)
-    if len(end_video) == 0:
-        return
-    ui.data.view_like_index = ui.data.view_like_index + 1
-    for e in end_video:
-        print(e)
-        parsing = crawling(e[0] + '(' + e[1] + ')', 'https://youtube.com/' + e[2])
-        if parsing is None:
-            print_in_list_box(e[0] + '(' + e[1] + ') - 알 수 없는 페이지')
-            continue
-        view_like_scraping(e, parsing)
-        ui.data.check_video_list.pop(e)
-    ui.data.df_view_like.to_excel(ui.data.real_view_like_name + str(ui.data.view_like_index) + '.xlsx', index=False)
-    print_in_list_box(ui.data.real_view_like_name + str(ui.data.view_like_index) + '.xlsx')
-
-
-def run():
-    if ui.data.stop:
-        return
+def monitoring():
+    while ui.data.live_index == 0:
+        continue
     start = time.time()
-    ui.data.df_live, ui.data.df_view_like = open_live_view_like_excel(ui.data)
-    fill_check_video_list()
-    print("====================== START ======================")
-    curr_time = get_curr_time()
-    ui.data.df_live[curr_time] = 0
-    for x in tqdm(range(len(ui.data.channel_list_urls))):
-        ui.progress_var.set(100 * ((x + 1) / len(ui.data.channel_list_urls)))
-        ui.progress_bar.update()
-        if type(ui.data.channel_list_names[x]) == float:
+    backup_df_live = ui.data.df_live
+    if ui.data.view_like_index != 0:
+        ui.data.df_view_like = pd.read_excel(ui.data.real_view_like_name + str(ui.data.view_like_index) + '.xlsx')
+    else:
+        ui.data.df_view_like = pd.read_excel(ui.data.default_view_like)
+    # 조회수+좋아요 엑셀에 이미 저장된 채널을 제외한 채널을 리스트에 삽입
+    ui.data.check_video_list = {}
+    for i in range(len(backup_df_live)):
+        if ui.data.view_like_index == 0:
+            ui.data.check_video_list[(backup_df_live.loc[i]['채널명'], backup_df_live.loc[i]['영상 제목'],
+                                      backup_df_live.loc[i]['영상 아이디'])] = False
             continue
-        if not valid_channel_url_form(ui.data.channel_list_names[x], ui.data.channel_list_urls[x]):
-            continue
-        parsing = crawling(ui.data.channel_list_names[x], ui.data.channel_list_urls[x])
+        if find_video_row_index(backup_df_live.loc[i]['채널명'], backup_df_live.loc[i]['영상 아이디'],
+                                ui.data.df_view_like) == -1:
+            ui.data.check_video_list[(backup_df_live.loc[i]['채널명'], backup_df_live.loc[i]['영상 제목'],
+                                      backup_df_live.loc[i]['영상 아이디'])] = False
+    # 크롤링하여 리스트에 저장된 채널이 종료되었는지 확인
+    flag = False
+    for key, value in ui.data.check_video_list.items():
+        parsing = crawling(key[0] + '(' + key[1] + ')', key[2])
         if parsing is None:
+            print_in_list_box(key[0] + '(' + key[1] + ') - 알 수 없는 페이지')
             continue
-        live_scraping(parsing, ui.data, ui.data.channel_list_names[x], curr_time)
-    ui.data.live_index = ui.data.live_index + 1
-    ui.data.df_live.to_excel(ui.data.real_live_name + str(ui.data.live_index) + '.xlsx', index=False)
-    print_in_list_box(ui.data.real_live_name + str(ui.data.live_index) + '.xlsx')
+        # 해당 채널이 실시간인지 아닌지 확인 후 데이터 저장
+        res = view_like_scraping(key, parsing)
+        if not flag:
+            flag = res
+    if flag:
+        ui.data.view_like_index = ui.data.view_like_index + 1
+        ui.data.df_view_like.to_excel(ui.data.real_view_like_name + str(ui.data.view_like_index) + '.xlsx', index=False)
+        print_in_list_box(ui.data.real_view_like_name + str(ui.data.view_like_index) + '.xlsx')
     sub_time = time.time() - start
-    print('총 실행 시간: %s 초' % sub_time)
-    print("======================= END =======================")
+    print('모니터링 총 실행 시간: %s 초' % sub_time)
 
-    ui.data.time_sum = ui.data.time_sum + sub_time
-    ui.data.time_cnt = ui.data.time_cnt + 1
-    threading.Timer(0, manage_ended_videos).start()
-
-    global run_thread
-    timer = ui.data.time_sum / ui.data.time_cnt
-    timer = (60 * int(ui.data.time_term) - timer)
-    run_thread = threading.Timer(timer, run)
-    run_thread.start()
+    monitoring_thread = threading.Timer(0, monitoring)
+    monitoring_thread.daemon = True
+    monitoring_thread.start()
 
 
-# ####################################### program ###########################################
-
+# #################################  monitoring program #####################################
 
 # ####################################### prepare ###########################################
 def check_result_path():
-    ui.data.real_live_path = ui.data.result_path + ui.data.slash + ui.data.today + ui.data.slash + ui.data.\
+    ui.data.real_live_path = ui.data.result_path + ui.data.slash + ui.data.today + ui.data.slash + ui.data. \
         result_live_path
     ui.data.real_live_name = ui.data.real_live_path + ui.data.slash + ui.data.today + '_실시간_'
     if not os.path.exists(ui.data.real_live_path):
@@ -344,7 +351,7 @@ def check_result_path():
                 ui.data.live_index = ui.data.live_index + 1
 
     # view_like_index
-    ui.data.real_view_like_path = ui.data.result_path + ui.data.slash + ui.data.today + ui.data.slash + ui.data.\
+    ui.data.real_view_like_path = ui.data.result_path + ui.data.slash + ui.data.today + ui.data.slash + ui.data. \
         result_view_like_path
     ui.data.real_view_like_name = ui.data.real_view_like_path + ui.data.slash + ui.data.today + '_조회수+좋아요_'
     if not os.path.exists(ui.data.real_view_like_path):
@@ -371,6 +378,8 @@ def start_program():
         return
     loop_time = int(ui.combo_select_loop_time.get()[:ui.combo_select_loop_time.get().find('분')])
     ui.data.time_term = loop_time
+    ui.data.time_sum = 0.0
+    ui.data.time_cnt = 0
     # 파일 인덱스 구하기
     ui.data.today = str(datetime.now().date())
     check_result_path()
@@ -380,12 +389,24 @@ def start_program():
     ui.button_find_file.config(state='disabled')
     ui.combo_select_loop_time.config(state='disabled')
 
-    threading.Timer(0, run).start()
+    run_thread = threading.Thread(target=run())
+    run_thread.daemon = True
+
+    # 근데 왜 처음 모니터링 부분에서 로딩이 길지 => 1초 정도 차이를 두고 2개의 스레드 실행으로 해결
+    monitoring_thread = threading.Timer(1, monitoring)
+    monitoring_thread.daemon = True
+
+    monitoring_thread.start()
+    run_thread.start()
+
+    # thread.join()
+    # 스레드의 종료를 기다렸다가 처리되어야 할 때 사용
+    # 스레드 안에서 무한루프가 실행되고 있는 상황에서는 조인 사용 x
 
 
 def stop_program():
     ui.data.stop = True
-    run_thread.cancel()
+    ui.data.run_thread.cancel()
     ui.progress_var.set(0)
     ui.progress_bar.update()
     ui.button_start.config(state='normal')
@@ -428,6 +449,8 @@ class DATA:
     # for time average
     time_sum = 0.0
     time_cnt = 0
+
+    run_thread = threading.Thread()
 
 
 class UI:
@@ -499,8 +522,6 @@ class UI:
                                 relief="raised", overrelief="sunken", width=15)
         button_stop.grid(column=2, row=0, padx=1)
         return progress_bar, progress_var, button_start, button_stop
-        # start_btn.pack(side='left')
-        # stop_btn.pack(side='right')
 
     def fill_frame_down(self):
         # 리스트 박스
@@ -528,12 +549,6 @@ def key_input(value):
     if value.keysym == 'Escape':
         exit(0)
 
-
-def test():
-    return
-
-
-run_thread = threading.Timer(600, test)
 
 if __name__ == '__main__':
     ui = UI(DATA())
