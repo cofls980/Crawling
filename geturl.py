@@ -39,15 +39,28 @@ def valid_channel_list_excel_form(file_path):
     try:
         names = list(rd_df['name'])
         urls = list(rd_df['url'])
+        if len(names) != len(urls):
+            return [], []
+        for i in range(len(names)):
+            if type(names[i]) == float and type(urls[i]) != float:
+                print_in_list_box('엑셀 파일 형식을 확인해 주세요.')
+                return [], []
+            if type(names[i]) != float and type(urls[i]) == float:
+                print_in_list_box('엑셀 파일 형식을 확인해 주세요.')
+                return [], []
     except:
-        print_in_list_box('엑셀 파일 형식을 맞춰 주세요.')
-        return [], [], []
+        print_in_list_box('엑셀 파일 형식을 확인해 주세요.')
+        return [], []
     return names, urls
 
 
 def valid_channel_url_form(name, url):
-    if not url.startswith('https://www.youtube.com/') or not url.endswith('/streams'):
-        print_in_list_box(str(name) + ': URL 형식 확인해 주세요.')
+    try:
+        if not url.startswith('https://www.youtube.com/') or not url.endswith('/streams'):
+            print_in_list_box(str(name) + ': URL 형식 확인해 주세요.')
+            return False
+    except:
+        print_in_list_box('엑셀 파일 형식을 확인해 주세요.')
         return False
     return True
 
@@ -71,13 +84,12 @@ def open_live_excel(data):
 
 def find_video_row_index(ch_name, video_id, data):
     for i in range(len(data)):
-        if data.loc[i]['채널명'] == ch_name and data.loc[i]['영상 아이디'] == video_id:
+        if data.loc[i]['채널명'] == ch_name and data.loc[i]['영상 주소'] == video_id:
             return i
     return -1
 
 
 # ####################################### utils ###########################################
-
 
 # ####################################### program ###########################################
 def crawling(name, url):
@@ -202,7 +214,7 @@ def run():
 # ####################################### program ###########################################
 
 # #################################  monitoring program #####################################
-def view_like_scraping(video_info, parsing):
+def view_like_scraping(video_info, parsing):  # 없는 채널일 경우는? 안 들어감.. 따로 처리 필요?
     like_cnt = -1
     view_cnt = -1
     for line in parsing:
@@ -262,6 +274,10 @@ def view_like_scraping(video_info, parsing):
                             like2 = like1.get('likeButton').get('toggleButtonRenderer')
                             if like2.get('defaultText') is None:
                                 continue
+                            if like2.get('defaultText').get('simpleText') is not None:
+                                if str(like2.get('defaultText').get('simpleText')) == '좋아요':  # 테스트 해보기 -> 오마이TV
+                                    like_cnt = '정보없음'
+                                    break
                             if like2.get('defaultText').get('accessibility') is None:
                                 continue
                             like3 = like2.get('defaultText').get('accessibility')
@@ -274,22 +290,28 @@ def view_like_scraping(video_info, parsing):
                         break
                     break
             break
+    if view_cnt == -1 or like_cnt == -1:
+        return False
     row_index = len(ui.data.df_view_like)
     ui.data.df_view_like.loc[row_index, '채널명'] = video_info[0]
     ui.data.df_view_like.loc[row_index, '영상 제목'] = video_info[1]
-    ui.data.df_view_like.loc[row_index, '영상 아이디'] = video_info[2]
-    if view_cnt == -1:
-        ui.data.df_view_like.loc[row_index, '조회수'] = '정보없음'
-    else:
-        ui.data.df_view_like.loc[row_index, '조회수'] = view_cnt
-    if like_cnt == -1:
-        ui.data.df_view_like.loc[row_index, '좋아요 수'] = '정보없음'
-    else:
-        ui.data.df_view_like.loc[row_index, '좋아요 수'] = like_cnt
+    ui.data.df_view_like.loc[row_index, '영상 주소'] = video_info[2]
+    ui.data.df_view_like.loc[row_index, '조회수'] = view_cnt
+    ui.data.df_view_like.loc[row_index, '좋아요 수'] = like_cnt
+    # if view_cnt == -1:
+    #     ui.data.df_view_like.loc[row_index, '조회수'] = '정보없음'
+    # else:
+    #     ui.data.df_view_like.loc[row_index, '조회수'] = view_cnt
+    # if like_cnt == -1:
+    #     ui.data.df_view_like.loc[row_index, '좋아요 수'] = '정보없음'
+    # else:
+    #     ui.data.df_view_like.loc[row_index, '좋아요 수'] = like_cnt
     return True
 
 
 def monitoring():
+    if ui.data.stop:
+        return
     while ui.data.live_index == 0:
         continue
     start = time.time()
@@ -303,15 +325,17 @@ def monitoring():
     for i in range(len(backup_df_live)):
         if ui.data.view_like_index == 0:
             ui.data.check_video_list[(backup_df_live.loc[i]['채널명'], backup_df_live.loc[i]['영상 제목'],
-                                      backup_df_live.loc[i]['영상 아이디'])] = False
+                                      backup_df_live.loc[i]['영상 주소'])] = False
             continue
-        if find_video_row_index(backup_df_live.loc[i]['채널명'], backup_df_live.loc[i]['영상 아이디'],
+        if find_video_row_index(backup_df_live.loc[i]['채널명'], backup_df_live.loc[i]['영상 주소'],
                                 ui.data.df_view_like) == -1:
             ui.data.check_video_list[(backup_df_live.loc[i]['채널명'], backup_df_live.loc[i]['영상 제목'],
-                                      backup_df_live.loc[i]['영상 아이디'])] = False
+                                      backup_df_live.loc[i]['영상 주소'])] = False
     # 크롤링하여 리스트에 저장된 채널이 종료되었는지 확인
     flag = False
     for key, value in ui.data.check_video_list.items():
+        if ui.data.stop:
+            return
         parsing = crawling(key[0] + '(' + key[1] + ')', key[2])
         if parsing is None:
             print_in_list_box(key[0] + '(' + key[1] + ') - 알 수 없는 페이지')
@@ -327,92 +351,165 @@ def monitoring():
     sub_time = time.time() - start
     print('모니터링 총 실행 시간: %s 초' % sub_time)
 
-    monitoring_thread = threading.Timer(0, monitoring)
-    monitoring_thread.daemon = True
-    monitoring_thread.start()
+    ui.data.monitoring_thread = threading.Timer(0, monitoring)
+    ui.data.monitoring_thread.daemon = True
+
+    if ui.data.stop:
+        return
+
+    ui.data.monitoring_thread.start()
 
 
 # #################################  monitoring program #####################################
+def monday_view():
+    start = time.time()
+    if ui.data.view_like_index != 0:
+        backup_df = pd.read_excel(ui.data.real_view_like_name + str(ui.data.view_like_index) + '.xlsx')
+        ui.data.df_view_like = pd.read_excel(ui.data.default_view_like)
+    else:
+        print_in_list_box('조회수+좋아요 폴더 또는 조회수+좋아요 엑셀 파일의 위치를 확인해 주세요.')
+        return
+    ui.data.check_video_list = {}
+    for i in range(len(backup_df)):
+        ui.data.check_video_list[(backup_df.loc[i]['채널명'], backup_df.loc[i]['영상 제목'],
+                                  backup_df.loc[i]['영상 주소'])] = False
+    flag = False
+    idx = 0
+    for key, value in ui.data.check_video_list.items():
+        ui.progress_var.set(100 * ((idx + 1) / len(ui.data.check_video_list)))
+        ui.progress_bar.update()
+        idx = idx + 1
+        parsing = crawling(key[0] + '(' + key[1] + ')', key[2])
+        if parsing is None:
+            print_in_list_box(key[0] + '(' + key[1] + ') - 알 수 없는 페이지')
+            continue
+        # 해당 채널이 실시간인지 아닌지 확인 후 데이터 저장
+        res = view_like_scraping(key, parsing)
+        if not flag:
+            flag = res
+    if flag:
+        ui.data.df_view_like.to_excel(ui.data.real_monday_name + '.xlsx', index=False)
+        print_in_list_box(ui.data.real_monday_name + '.xlsx')
+    sub_time = time.time() - start
+    print('월요일 조회수 총 실행 시간: %s 초' % sub_time)
+
 
 # ####################################### prepare ###########################################
 def check_result_path():
     ui.data.real_live_path = ui.data.result_path + ui.data.slash + ui.data.today + ui.data.slash + ui.data. \
         result_live_path
     ui.data.real_live_name = ui.data.real_live_path + ui.data.slash + ui.data.today + '_실시간_'
-    if not os.path.exists(ui.data.real_live_path):
-        os.makedirs(ui.data.real_live_path)
-    if os.path.exists(ui.data.real_live_name + '1.xlsx'):
-        ui.data.live_index = 2
-        while True:
-            if not os.path.exists(ui.data.real_live_name + str(ui.data.live_index) + '.xlsx'):
-                ui.data.live_index = ui.data.live_index - 1
-                break
-            else:
-                ui.data.live_index = ui.data.live_index + 1
-
-    # view_like_index
     ui.data.real_view_like_path = ui.data.result_path + ui.data.slash + ui.data.today + ui.data.slash + ui.data. \
         result_view_like_path
     ui.data.real_view_like_name = ui.data.real_view_like_path + ui.data.slash + ui.data.today + '_조회수+좋아요_'
+
+    if not os.path.exists(ui.data.real_live_path):
+        os.makedirs(ui.data.real_live_path)
     if not os.path.exists(ui.data.real_view_like_path):
         os.makedirs(ui.data.real_view_like_path)
-    if os.path.exists(ui.data.real_view_like_name + '1.xlsx'):
-        ui.data.view_like_index = 2
-        while True:
-            if not os.path.exists(ui.data.real_view_like_name + str(ui.data.view_like_index) + '.xlsx'):
-                ui.data.view_like_index = ui.data.view_like_index - 1
-                break
-            else:
-                ui.data.view_like_index = ui.data.view_like_index + 1
+
+    excels_live = []
+    for (root, dirs, files) in os.walk(ui.data.real_live_path):
+        for file in files:
+            if '.xlsx' in file and '_실시간_' in file:
+                file = str(file)[str(file).find('간') + 2:str(file).find('.')]
+                excels_live.append(int(file))
+    if len(excels_live) == 0:
+        ui.data.live_index = 0
+    else:
+        excels_live.sort()
+        ui.data.live_index = excels_live[len(excels_live) - 1]
+
+    excels_view_like = []
+    for (root, dirs, files) in os.walk(ui.data.real_view_like_path):
+        for file in files:
+            if '.xlsx' in file and '_조회수+좋아요_' in file:
+                file = str(file)[str(file).find('요') + 2:str(file).find('.')]
+                excels_view_like.append(int(file))
+    if len(excels_view_like) == 0:
+        ui.data.view_like_index = 0
+    else:
+        excels_view_like.sort()
+        ui.data.view_like_index = excels_view_like[len(excels_view_like) - 1]
 
 
 def start_program():
-    ui.data.first_start = True
-    # 입력과 파일 형식 확인
-    file_path = valid_file_combo()
-    if file_path == '':
-        return
-    ui.data.channel_list_names, ui.data.channel_list_urls = \
-        valid_channel_list_excel_form(file_path)
-    if not ui.data.channel_list_names:
-        return
-    loop_time = int(ui.combo_select_loop_time.get()[:ui.combo_select_loop_time.get().find('분')])
-    ui.data.time_term = loop_time
-    ui.data.time_sum = 0.0
-    ui.data.time_cnt = 0
-    # 파일 인덱스 구하기
     ui.data.today = str(datetime.now().date())
-    check_result_path()
-    # 버튼 설정 & 프로그램 실행
-    ui.data.stop = False
-    ui.button_start.config(state='disabled')
-    ui.button_find_file.config(state='disabled')
-    ui.combo_select_loop_time.config(state='disabled')
+    if ui.radio_var.get() == 2:
+        # ui.data.first_start = True
+        # 입력과 파일 형식 확인
+        file_path = valid_file_combo()
+        if file_path == '':
+            return
+        ui.data.channel_list_names, ui.data.channel_list_urls = \
+            valid_channel_list_excel_form(file_path)
+        if not ui.data.channel_list_names:
+            return
+        loop_time = int(ui.combo_select_loop_time.get()[:ui.combo_select_loop_time.get().find('분')])
+        ui.data.time_term = loop_time
+        ui.data.time_sum = 0.0
+        ui.data.time_cnt = 0
+        # 파일 인덱스 구하기
+        check_result_path()
+        # 버튼 설정 & 프로그램 실행
+        ui.data.stop = False
+        ui.button_start.config(state='disabled')
+        ui.button_find_file.config(state='disabled')
+        ui.combo_select_loop_time.config(state='disabled')
 
-    run_thread = threading.Thread(target=run())
-    run_thread.daemon = True
+        run_thread = threading.Thread(target=run())
+        run_thread.daemon = True
 
-    # 근데 왜 처음 모니터링 부분에서 로딩이 길지 => 1초 정도 차이를 두고 2개의 스레드 실행으로 해결
-    monitoring_thread = threading.Timer(1, monitoring)
-    monitoring_thread.daemon = True
+        # 근데 왜 처음 모니터링 부분에서 로딩이 길지 => 1초 정도 차이를 두고 2개의 스레드 실행으로 해결
+        # 다른 문제점: 스타트 클릭했을 때만 동작을 하고 스탑 버튼을 클릭했을 때 멈추게 할지
+        monitoring_thread = threading.Timer(1, monitoring)
+        monitoring_thread.daemon = True
 
-    monitoring_thread.start()
-    run_thread.start()
+        monitoring_thread.start()
+        run_thread.start()
 
-    # thread.join()
-    # 스레드의 종료를 기다렸다가 처리되어야 할 때 사용
-    # 스레드 안에서 무한루프가 실행되고 있는 상황에서는 조인 사용 x
+        # thread.join()
+        # 스레드의 종료를 기다렸다가 처리되어야 할 때 사용
+        # 스레드 안에서 무한루프가 실행되고 있는 상황에서는 조인 사용 x
+    else:
+        # 월요일
+        ui.button_start.config(state='disabled')
+        ui.button_stop.config(state='disabled')
+
+        # 월요일 조회수 폴더가 있는지 확인
+        ui.data.real_monday_path = ui.data.result_path + ui.data.slash + ui.data.result_monday_path
+        ui.data.real_monday_name = ui.data.real_monday_path + ui.data.slash + ui.data.today + '_월요일'
+        if not os.path.exists(ui.data.real_monday_path):
+            os.makedirs(ui.data.real_monday_path)
+
+        check_result_path()
+
+        monitoring_thread = threading.Thread(target=monday_view())
+        monitoring_thread.daemon = True
+
+        monitoring_thread.start()
+        monitoring_thread.join()
+
+        ui.button_start.config(state='normal')
+        ui.button_stop.config(state='normal')
+        ui.progress_var.set(0)
+        ui.progress_bar.update()
 
 
 def stop_program():
     ui.data.stop = True
     ui.data.run_thread.cancel()
+    ui.data.monitoring_thread.cancel()
     ui.progress_var.set(0)
     ui.progress_bar.update()
     ui.button_start.config(state='normal')
     ui.button_find_file.config(state='normal')
     ui.combo_select_loop_time.config(state='normal')
     print_in_list_box("일시 정지")
+
+
+def test1():
+    pass
 
 
 @dataclass
@@ -428,10 +525,13 @@ class DATA:
     result_path = '결과'
     result_live_path = '실시간 시청자 수'
     result_view_like_path = '조회수+좋아요'
+    result_monday_path = '월요일 조회수'
     real_live_path = ''
     real_view_like_path = ''
+    real_monday_path = ''
     real_live_name = ''
     real_view_like_name = ''
+    real_monday_name = ''
 
     default_live = 'default_live.xlsx'
     default_view_like = 'default_view_like.xlsx'
@@ -450,7 +550,8 @@ class DATA:
     time_sum = 0.0
     time_cnt = 0
 
-    run_thread = threading.Thread()
+    run_thread = threading.Timer(0, test1)  #
+    monitoring_thread = threading.Timer(0, test1)  #
 
 
 class UI:
@@ -467,7 +568,7 @@ class UI:
         self.frame_up, self.frame_down = self.make_frames()
         self.label_search, self.label_combo, self.label_button = self.make_frame_up_labels()
         self.box_find_file, self.button_find_file = self.fill_label_search()
-        self.combo_select_goal, self.combo_select_loop_time = self.fill_label_combo()
+        self.radio_var, self.radio_monday, self.radio_live, self.combo_select_loop_time = self.fill_label_radio_combo()
         self.box_result_comment = self.fill_frame_down()
         self.progress_bar, self.progress_var, self.button_start, self.button_stop = self.fill_label_button()
         self.data = data
@@ -480,38 +581,41 @@ class UI:
         return frame_up, frame_down
 
     def make_frame_up_labels(self):
-        label_search = tk.Label(self.frame_up)
-        label_search.pack(side='top', padx=5)
         label_combo = tk.Label(self.frame_up)  # , relief='solid'
         label_combo.pack(side='top', padx=5, pady=1)  # , fill='both'
+        label_search = tk.Label(self.frame_up)
+        label_search.pack(side='top', padx=5)
         label_button = tk.Label(self.frame_up)  # , relief='solid'
         label_button.pack(side='top', padx=60)  # , fill='both'
         return label_search, label_combo, label_button
 
     def fill_label_search(self):
-        box_find_file = tk.Entry(self.label_search, width=41)
+        box_find_file = tk.Entry(self.label_search, width=50)
         box_find_file.pack(side='left', padx=1)
         button_find_file = tk.Button(self.label_search, text='찾기', command=self.get_file,
                                      relief="raised", overrelief="sunken")
         button_find_file.pack(side='right')
         return box_find_file, button_find_file
 
-    def fill_label_combo(self):
-        select_goal = ['실시간 시청자 수', '조회수']
-        combo1 = ttk.Combobox(self.label_combo, height=5, values=select_goal, state='readonly')
-        combo1.set('실시간 시청자 수')
-        combo1.grid(column=0, row=0, padx=1)
-        combo1.config(state='disabled')
+    def fill_label_radio_combo(self):
+        radio_var = tk.IntVar()
+        radio1 = tk.Radiobutton(self.label_combo, text='월요일 조회수', value=1, variable=radio_var, command=self.clicked_monday_radio)
+        radio2 = tk.Radiobutton(self.label_combo, text='실시간 시청자 수', value=2, variable=radio_var, command=self.clicked_live_radio)
+        # combo1 = ttk.Combobox(self.label_combo, height=5, values=select_goal, state='readonly')
+        # combo1.set('실시간 시청자 수')
+        radio1.grid(column=0, row=0, padx=1)
+        radio2.grid(column=1, row=0, padx=1)
+        # combo1.config(state='disabled')
         # 반복 시간 콤보 박스
         select_time = [str(i) + "분" for i in range(1, 61)]
         loop_time = ttk.Combobox(self.label_combo, height=10, values=select_time, state='readonly')
         loop_time.set('반복 시간 선택')
-        loop_time.grid(column=1, row=0, padx=1)
-        return combo1, loop_time
+        loop_time.grid(column=2, row=0, padx=1)
+        return radio_var, radio1, radio2, loop_time
 
     def fill_label_button(self):
         progress_var = tk.DoubleVar()
-        progress_bar = ttk.Progressbar(self.label_button, maximum=100, length=150, variable=progress_var)
+        progress_bar = ttk.Progressbar(self.label_button, maximum=100, length=157, variable=progress_var)
         progress_bar.grid(column=0, row=0, padx=1)
         # start
         button_start = tk.Button(self.label_button, text='시작', command=start_program,
@@ -544,10 +648,28 @@ class UI:
         except:
             return
 
+    def clicked_monday_radio(self):
+        # self.radio_monday.config(state='normal')
+        # self.radio_live.config(state='disabled')
+        self.combo_select_loop_time.config(state='disabled')
+        self.box_find_file.config(state='disabled')
+        self.button_find_file.config(state='disabled')
+
+    def clicked_live_radio(self):
+        # self.radio_live.config(state='normal')
+        self.combo_select_loop_time.config(state='normal')
+        self.box_find_file.config(state='normal')
+        self.button_find_file.config(state='normal')
+        # self.radio_monday.config(state='disabled')
+
 
 def key_input(value):
     if value.keysym == 'Escape':
         exit(0)
+
+
+def test():
+    print_in_list_box("hello")
 
 
 if __name__ == '__main__':
