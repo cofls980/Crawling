@@ -11,11 +11,11 @@ import threading
 
 import json
 import time
-from tqdm import tqdm
 
 import os.path
 
 from datetime import datetime
+import datetime as dt
 
 
 # ####################################### utils ###########################################
@@ -29,6 +29,17 @@ def valid_file_combo():
         return ''
     if file_path == '' or ui.combo_select_loop_time.get() == '반복 시간 선택':
         print_in_list_box('파일과 반복 시간 모두 선택해 주세요.')
+        return ''
+    if '.xlsx' not in file_path or '.xls' not in file_path:
+        print_in_list_box('엑셀 파일을 선택해 주세요.')
+        return ''
+    return file_path
+
+
+def valid_file_combo_monday():
+    file_path = ui.box_find_file.get()
+    if file_path == '':
+        print_in_list_box('파일을 선택해 주세요.')
         return ''
     if '.xlsx' not in file_path or '.xls' not in file_path:
         print_in_list_box('엑셀 파일을 선택해 주세요.')
@@ -56,6 +67,24 @@ def valid_channel_list_excel_form(file_path):
     return names, urls
 
 
+def valid_channel_list_excel_form_monday(file_path):
+    rd_df = pd.read_excel(file_path)
+    try:
+        names = list(rd_df['채널명'])
+        titles = list(rd_df['영상 제목'])
+        urls = list(rd_df['영상 주소'])
+        if len(names) != len(urls) or len(names) != len(titles) or len(titles) != len(urls):
+            return [], [], []
+        for i in range(len(names)):
+            if type(names[i]) == float or type(titles[i]) == float or type(urls[i]) == float:
+                print_in_list_box('엑셀 파일 형식을 확인해 주세요.')
+                return [], [], []
+    except:
+        print_in_list_box('엑셀 파일 형식을 확인해 주세요.')
+        return [], [], []
+    return names, titles, urls
+
+
 def valid_channel_url_form(name, url):
     try:
         if not url.startswith('https://www.youtube.com/') or not url.endswith('/streams'):
@@ -68,7 +97,19 @@ def valid_channel_url_form(name, url):
 
 
 def get_curr_time():
-    now = str(datetime.now().hour) + ':' + str(datetime.now().minute) + ':' + str(datetime.now().second)
+    if datetime.now().hour < 10:
+        hour = '0' + str(datetime.now().hour)
+    else:
+        hour = str(datetime.now().hour)
+    if datetime.now().minute < 10:
+        minute = '0' + str(datetime.now().minute)
+    else:
+        minute = str(datetime.now().minute)
+    if datetime.now().second < 10:
+        second = '0' + str(datetime.now().second)
+    else:
+        second = str(datetime.now().second)
+    now = hour + ':' + minute + ':' + second
     return now
 
 
@@ -111,7 +152,7 @@ def crawling(name, url):
 
 def live_scraping(parsing, data, channel_name, column_name):
     for line in parsing:
-        if 'ytInitialData' in line:
+        if 'var ytInitialData = ' in line:
             line = line.strip('var ytInitialData = ')
             line = line.strip(';')
             json_object = json.loads(line)
@@ -229,14 +270,20 @@ def is_not_found(contents):
         return True
     if '업로더가 삭제한 동영상입니다.' in str(contents):
         return True
+    if '비공개 동영상입니다.' in str(contents):
+        return True
     return False
 
 
 def view_like_scraping(video_info, parsing):
     like_cnt = -1
     view_cnt = -1
+    if is_not_found(str(parsing)):
+        like_cnt = '삭제된 영상'
+        view_cnt = '삭제된 영상'
+        parsing = []
     for line in parsing:
-        if 'ytInitialData' in line:
+        if 'var ytInitialData = ' in line:
             line = line.strip('var ytInitialData = ').strip(';')
             json_object = json.loads(line)
             if json_object.get('contents') is None:
@@ -252,14 +299,6 @@ def view_like_scraping(video_info, parsing):
                 continue
             contents = json_object.get('contents').get('twoColumnWatchNextResults').get('results').get('results').get(
                 'contents')
-            if is_not_found(contents):
-                # f = open('test.txt', 'a', newline='', encoding='utf-16')
-                # f.write(video_info[0] + '\n\n')
-                # f.write(str(contents) + '\n\n\n\n')
-                # f.close()
-                like_cnt = '삭제된 영상'
-                view_cnt = '삭제된 영상'
-                break
             for content in contents:
                 if '시청 중' in str(content):
                     return False
@@ -385,38 +424,104 @@ def monitoring():
 
 
 # #################################  monitoring program #####################################
-def monday_view():
-    start = time.time()
-    if ui.data.view_like_index != 0:
-        backup_df = pd.read_excel(ui.data.real_view_like_name + str(ui.data.view_like_index) + '.xlsx')
-        ui.data.df_view_like = pd.read_excel(ui.data.default_view_like)
-    else:
-        print_in_list_box('조회수+좋아요 폴더 또는 조회수+좋아요 엑셀 파일의 위치를 확인해 주세요.')
-        return
-    ui.data.check_video_list = {}
-    for i in range(len(backup_df)):
-        ui.data.check_video_list[(backup_df.loc[i]['채널명'], backup_df.loc[i]['영상 제목'],
-                                  backup_df.loc[i]['영상 주소'])] = False
-    flag = False
-    idx = 0
-    for key, value in ui.data.check_video_list.items():
-        ui.progress_var.set(100 * ((idx + 1) / len(ui.data.check_video_list)))
-        ui.progress_bar.update()
-        idx = idx + 1
-        parsing = crawling(key[0] + '(' + key[1] + ')', key[2])
-        if parsing is None:
-            print_in_list_box(key[0] + '(' + key[1] + ') - 알 수 없는 페이지')
-            continue
-        # 해당 채널이 실시간인지 아닌지 확인 후 데이터 저장
-        res = view_like_scraping(key, parsing)
-        if not flag:
-            flag = res
-    if flag:
-        ui.data.df_view_like.to_excel(ui.data.real_monday_name + '.xlsx', index=False)
-        print_in_list_box(ui.data.real_monday_name + '.xlsx')
-    sub_time = time.time() - start
-    print('월요일 조회수 총 실행 시간: %s 초' % sub_time)
 
+# #################################  monday program #####################################
+def monday_view_scraping(video_info, parsing):
+    view_cnt = -1
+    if is_not_found(str(parsing)):
+        view_cnt = '삭제된 영상'
+        parsing = []
+    for line in parsing:
+        if 'var ytInitialData = ' in line:
+            line = line.strip('var ytInitialData = ').strip(';')
+            json_object = json.loads(line)
+            if json_object.get('contents') is None:
+                continue
+            if json_object.get('contents').get('twoColumnWatchNextResults') is None:
+                continue
+            if json_object.get('contents').get('twoColumnWatchNextResults').get('results') is None:
+                continue
+            if json_object.get('contents').get('twoColumnWatchNextResults').get('results').get('results') is None:
+                continue
+            if json_object.get('contents').get('twoColumnWatchNextResults').get('results').get('results').get(
+                    'contents') is None:
+                continue
+            contents = json_object.get('contents').get('twoColumnWatchNextResults').get('results').get('results').get(
+                'contents')
+            for content in contents:
+                if '시청 중' in str(content):
+                    return False
+                if '좋아요' in str(content):
+                    if content.get('videoPrimaryInfoRenderer') is None:
+                        continue
+                    content = content.get('videoPrimaryInfoRenderer')
+                    if content.get('viewCount') is None:
+                        continue
+                    if content.get('viewCount').get('videoViewCountRenderer') is None:
+                        continue
+                    if content.get('viewCount').get('videoViewCountRenderer').get('viewCount') is None:
+                        continue
+                    views = content.get('viewCount').get('videoViewCountRenderer').get('viewCount')
+                    if views.get('simpleText') is None:
+                        continue
+                    if '조회수' not in str(views):
+                        break
+                    views = views.get('simpleText')
+                    view_cnt = str(views)[4:]
+                    view_cnt = int(view_cnt[:view_cnt.find('회')].replace(',', ''))
+                    break
+            break
+    if view_cnt == -1:
+        return False
+    row_index = len(ui.data.df_monday_view)
+    ui.data.df_monday_view.loc[row_index, '채널명'] = video_info[0]
+    ui.data.df_monday_view.loc[row_index, '영상 제목'] = video_info[1]
+    ui.data.df_monday_view.loc[row_index, '영상 주소'] = video_info[2]
+    ui.data.df_monday_view.loc[row_index, '조회수'] = view_cnt
+    return True
+
+
+def monday_view():
+    try:
+        start = time.time()
+        ui.data.df_monday_view = pd.read_excel(ui.data.default_monday_view)
+        for x in range(len(ui.data.channel_list_urls)):
+            ui.progress_var.set(100 * ((x + 1) / len(ui.data.channel_list_urls)))
+            ui.progress_bar.update()
+            if type(ui.data.channel_list_names[x]) == float:
+                continue
+            parsing = crawling(ui.data.channel_list_names[x] + '(' + ui.data.channel_list_titles[x] + ')',
+                               ui.data.channel_list_urls[x])
+            if parsing is None:
+                print_in_list_box(ui.data.channel_list_names[x] + '(' + ui.data.channel_list_titles[x] +
+                                  ') - 알 수 없는 페이지')
+                continue
+            info = (ui.data.channel_list_names[x], ui.data.channel_list_titles[x], ui.data.channel_list_urls[x])
+            monday_view_scraping(info, parsing)
+
+        created_file_name = ui.data.real_monday_path + ui.data.slash + str(datetime.now().date()) + '_월요일_조회수.xlsx'
+        ui.data.df_monday_view.to_excel(created_file_name, index=False)
+        print_in_list_box(created_file_name)
+
+        sub_time = time.time() - start
+        print('월요일 조회수 총 실행 시간: %s 초' % sub_time)
+    except:
+        msgbox.showerror("에러", "에러 문의 주세요.")
+        err = traceback.format_exc()
+        ErrorLog(str(err))
+        stop_program()
+    ui.button_start.config(state='normal')
+    ui.button_stop.config(state='normal')
+    ui.radio_monday.config(state='normal')
+    ui.radio_live.config(state='normal')
+    ui.button_find_file.config(state='normal')
+    ui.box_find_file.config(state='normal')
+
+    ui.progress_var.set(0)
+    ui.progress_bar.update()
+
+
+# #################################  monday program #####################################
 
 # ####################################### prepare ###########################################
 def check_result_path():
@@ -480,7 +585,10 @@ def start_program():
             ui.data.stop = False
             ui.button_start.config(state='disabled')
             ui.button_find_file.config(state='disabled')
+            ui.box_find_file.config(state='disabled')
             ui.combo_select_loop_time.config(state='disabled')
+            ui.radio_live.config(state='disabled')
+            ui.radio_monday.config(state='disabled')
 
             run_thread = threading.Thread(target=run())
             run_thread.daemon = True
@@ -497,28 +605,54 @@ def start_program():
             # 스레드의 종료를 기다렸다가 처리되어야 할 때 사용
             # 스레드 안에서 무한루프가 실행되고 있는 상황에서는 조인 사용 x
         else:
-            # 월요일
-            ui.button_start.config(state='disabled')
-            ui.button_stop.config(state='disabled')
-
             # 월요일 조회수 폴더가 있는지 확인
             ui.data.real_monday_path = ui.data.result_path + ui.data.slash + ui.data.result_monday_path
             ui.data.real_monday_name = ui.data.real_monday_path + ui.data.slash + ui.data.today + '_월요일'
             if not os.path.exists(ui.data.real_monday_path):
                 os.makedirs(ui.data.real_monday_path)
+            # 입력으로 실시간 시청자 수 마지막 엑셀을 넣어주자
+            file_path = valid_file_combo_monday()
+            if file_path == '':
+                return
+            ui.data.channel_list_names, ui.data.channel_list_titles, ui.data.channel_list_urls = \
+                valid_channel_list_excel_form_monday(file_path)
+            if not ui.data.channel_list_names:
+                return
 
-            check_result_path()
+            # 저장 파일 이름이 이미 존재해서 겹칠 땐?
+            monday = datetime.now()
+            if monday.weekday() != 0:
+                monday = monday + dt.timedelta(days=(7 - monday.weekday()))
+                monday.date()
+            ui.data.real_monday_name = ui.data.real_monday_path + ui.data.slash + str(monday.date()) + '_월요일_조회수.xlsx'
+            if os.path.exists(ui.data.real_monday_name):
+                print_in_list_box('월요일 조회수 결과 파일 이름이 겹칩니다.')
+                return
 
-            monitoring_thread = threading.Thread(target=monday_view())
-            monitoring_thread.daemon = True
-
-            monitoring_thread.start()
-            monitoring_thread.join()
-
-            ui.button_start.config(state='normal')
-            ui.button_stop.config(state='normal')
-            ui.progress_var.set(0)
-            ui.progress_bar.update()
+            # 시작 요일이 월요일이면 바로 실행
+            # 월요일이 아니면 시작 구동까지 얼마나 남았는지 알려주고 월요일이 되면 실행
+            ui.button_start.config(state='disabled')
+            ui.radio_monday.config(state='disabled')
+            ui.radio_live.config(state='disabled')
+            ui.button_find_file.config(state='disabled')
+            ui.box_find_file.config(state='disabled')
+            now = datetime.now()
+            if now.weekday() != 0:
+                to_str = str(monday.year) + '-' + str(monday.month) + '-' + str(monday.day)
+                monday = datetime.strptime(to_str, '%Y-%m-%d')
+                # monday = datetime.strptime('2023-1-11 18:10', '%Y-%m-%d %H:%M')
+                sub_day = monday - now
+                wait_msg = '월요일 조회수 데이터 수집 시작까지 '
+                wait_msg = wait_msg + str(sub_day).split('.')[0].replace(' days', '일').replace(',', '')
+                wait_msg = wait_msg.replace(':', '시간 ', 1)
+                wait_msg = wait_msg.replace(':', '분 ') + '초 남았습니다.'
+                print_in_list_box(wait_msg)
+                ui.data.monday_thread = threading.Timer(sub_day.seconds, monday_view)
+            else:
+                ui.button_stop.config(state='disabled')
+                ui.data.monday_thread = threading.Timer(0, monday_view)
+            ui.data.monday_thread.daemon = True
+            ui.data.monday_thread.start()
     except:
         msgbox.showerror("에러", "에러 문의 주세요.")
         err = traceback.format_exc()
@@ -531,11 +665,16 @@ def stop_program():
         ui.data.stop = True
         ui.data.run_thread.cancel()
         ui.data.monitoring_thread.cancel()
+        ui.data.monday_thread.cancel()
         ui.progress_var.set(0)
         ui.progress_bar.update()
         ui.button_start.config(state='normal')
         ui.button_find_file.config(state='normal')
-        ui.combo_select_loop_time.config(state='readonly')
+        ui.box_find_file.config(state='normal')
+        if ui.radio_var.get() == 2:
+            ui.combo_select_loop_time.config(state='readonly')
+        ui.radio_live.config(state='normal')
+        ui.radio_monday.config(state='normal')
         print_in_list_box("일시 정지")
     except:
         msgbox.showerror("에러", "에러 문의 주세요.")
@@ -553,6 +692,7 @@ class DATA:
     today = str(datetime.now().date())
     time_term = 0
     channel_list_names = []
+    channel_list_titles = []
     channel_list_urls = []
 
     # path, name
@@ -570,6 +710,7 @@ class DATA:
 
     default_live = '필수_실시간.xlsx'
     default_view_like = '필수_조회수+좋아요.xlsx'
+    default_monday_view = '필수_월요일_조회수.xlsx'
 
     # for live streaming videos
     live_index = 0
@@ -581,12 +722,16 @@ class DATA:
     check_video_list = {}
     df_view_like = pd.DataFrame()
 
+    # for monday view
+    df_monday_view = pd.DataFrame()
+
     # for time average
     time_sum = 0.0
     time_cnt = 0
 
     run_thread = threading.Timer(0, test1)  #
     monitoring_thread = threading.Timer(0, test1)  #
+    monday_thread = threading.Timer(0, test1)
 
 
 class UI:
@@ -644,7 +789,6 @@ class UI:
         loop_time.set('반복 시간 선택')
         loop_time.grid(column=2, row=0, padx=1)
         radio2.select()
-        radio1.config(state='disabled')
         return radio_var, radio1, radio2, loop_time
 
     def fill_label_button(self):
@@ -684,35 +828,33 @@ class UI:
 
     def clicked_monday_radio(self):
         self.combo_select_loop_time.config(state='disabled')
-        self.box_find_file.config(state='disabled')
-        self.button_find_file.config(state='disabled')
 
     def clicked_live_radio(self):
         self.combo_select_loop_time.config(state='readonly')
-        self.box_find_file.config(state='normal')
-        self.button_find_file.config(state='normal')
 
 
 def key_input(value):
-    print(str(value.keysym))
     if value.keysym == 'Escape':
         exit(0)
 
 
-def help():
+def comments(flag):
     he = tk.Toplevel(ui.window)
-    he.geometry('640x760')
+    he.geometry('640x500')
     he.resizable(False, False)
-    he.title("설명")
-    text = '\
+    if flag == 1:
+        he.title("프로그램 시작 전 필수")
+        text = '\
 [프로그램 시작 전 필수]\n\n\
 1. 집계 프로그램.exe, 필수_실시간.xlsx, 필수_조회수+좋아요.xlsx 세 가지 파일들은 반드시 같은 폴더에 있어야 합니다.\n\n\
 2. 채널 엑셀 파일에 필요한 요소\n\
 - 첫 번째 행에서 첫 번째 열에는 "채널 이름"이, 두 번째 열에는 "실시간 주소"가 고정되어 있어야 합니다.\n\
 - 추가하려는 "채널 이름"과 "실시간 주소"를 짝을 맞춰서 저장해 주세요.\n\
 ex) 채널 이름=뭉치의 개팔상팔, 실시간 주소=https://www.youtube.com/@whyrano_gaemungchi/streams\n\
-- 채널_목록.xlsx 파일을 참고하면 됩니다.\n\n\n\
-["실시간 시청자 수" 선택 시]\n\n\
+- 채널_목록.xlsx 파일을 참고하면 됩니다.'
+    elif flag == 2:
+        he.title('"실시간 시청자 수" 선택 시')
+        text = '["실시간 시청자 수" 선택 시]\n\n\
 1. 실시간 시청자 수 데이터를 실시간으로 저장하고, 실시간 스트리밍이 끝난 영상에 대한 조회수+좋아요 데이터도 실시간으로 저장됩니다.\n\n\
 2. 실행 과정 및 결과\n\
 - 반복 시간을 선택 후, 채널 정보가 들어간 엑셀 파일을 선택해 주세요.\n\
@@ -732,10 +874,23 @@ ex) 채널 이름=뭉치의 개팔상팔, 실시간 주소=https://www.youtube.c
 - 한 턴 당 엑셀 파일이 추가로 생성되며, 데이터 누적 저장 시 파일 손상을 줄이기 위함이므로 가장 마지막에 생성된 엑셀만 봐도 됩니다.\n\n\
 5. 정지 버튼 클릭 시\n\
 - 실시간 시청자 수 데이터와 조회수+좋아요 데이터 수집 및 저장이 중지됩니다.\n\
-- 실시간 시청자 수 데이터 수집뿐만 아니라 조회수+좋아요 데이터 수집이 중지되므로 종료된 영상의 조회수+좋아요 데이터가 모두 저장되면 정지 버튼을 누르는 것을 권장합니다.\n\n\n\
-[추가]\n\n\
+- 실시간 시청자 수 데이터 수집뿐만 아니라 조회수+좋아요 데이터 수집이 중지되므로 종료된 영상의 조회수+좋아요 데이터가 모두 저장되면 정지 버튼을 누르는 것을 권장합니다.'
+    elif flag == 3:
+        he.title('"월요일 조회수" 선택 시')
+        text = '["월요일 조회수" 선택 시]\n\n\
+1. 실시간 또는 조회수+좋아요 엑셀 파일 내 영상들의 월요일 조회 수를 저장합니다.\n\n\
+2. 실행 과정 및 결과\n\
+- "실시간 시청자 수"엑셀 또는 "조회수+좋아요"엑셀 파일을 찾아 선택하고 시작 버튼을 눌러 주세요.\n\
+- 시작 버튼을 눌렀을 시점의 요일이 월요일이 아니면 월요일 0시 0분 0초가 될 때까지 기다렸다가 자동으로 데이터 수집이 시작됩니다.\n\
+- 시작 버튼을 눌렀을 시점의 요일이 월요일이라면 바로 그 시간의 데이터가 수집됩니다.\n\n\
+3. 생성된 엑셀 저장 위치\n\
+- "결과" 폴더 내에 "월요일 조회수" 폴더가 생성되고, 그 안에 월요일 날짜(년-월-일)가 포함된 이름을 가진 엑셀 파일이 저장됩니다.\n\
+- 만약 파일 이름이 겹친다면 기존 파일을 옮기거나 삭제 후 다시 실행시켜주세요.'
+    else:
+        he.title('기타 설명')
+        text = '[추가]\n\n\
 - 필수 엑셀 파일이 없거나 엑셀 형식이 틀리거나 채널의 데이터를 수집할 수 없을 경우 프로그램 하단 부분에 생성되는 메시지를 확인해 주세요.\n\
-- "에러 문의해 주세요." 메시지 창이 뜨면 프로그램과 같은 폴더 경로에 생긴 result 파일을 첨부하여 바로 문의해 주세요.'
+- "에러 문의해 주세요." 메시지 창이 뜨면 프로그램과 같은 폴더 경로에 생긴 "오류" 파일을 첨부하여 바로 문의해 주세요.'
     # lb = tk.Text(he)
     # lb.insert(tk.INSERT, text)
     lb = tk.Label(he, text=text, wraplength=640, justify='left')
@@ -744,7 +899,7 @@ ex) 채널 이름=뭉치의 개팔상팔, 실시간 주소=https://www.youtube.c
 
 def ErrorLog(error: str):
     current_time = time.strftime("%Y.%m.%d/%H:%M:%S", time.localtime(time.time()))
-    with open("result.log", "a") as f:
+    with open("오류.log", "a") as f:
         f.write(f"[{current_time}] - {error}\n")
 
 
@@ -753,9 +908,12 @@ if __name__ == '__main__':
         ui = UI(DATA())
 
         menubar = tk.Menu(ui.window)
-        helpmenu = tk.Menu(menubar, tearoff=0)
-        helpmenu.add_command(label="설명", command=help)
-        menubar.add_cascade(label="도움말", menu=helpmenu)
+        help_menu = tk.Menu(menubar, tearoff=0)
+        help_menu.add_command(label="프로그램 시작 전 필수", command=lambda: comments(1))
+        help_menu.add_command(label='"실시간 시청자 수" 선택 시', command=lambda: comments(2))
+        help_menu.add_command(label='"월요일 조회수" 선택 시', command=lambda: comments(3))
+        help_menu.add_command(label='기타 설명', command=lambda: comments(4))
+        menubar.add_cascade(label="설명", menu=help_menu)
 
         ui.window.config(menu=menubar)
 
