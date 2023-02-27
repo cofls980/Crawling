@@ -500,8 +500,9 @@ def monday_view():
             monday_view_scraping(info, parsing)
 
         created_file_name = ui.data.real_monday_path + ui.data.slash + str(datetime.now().date()) + '_월요일_조회수.xlsx'
-        ui.data.df_monday_view.to_excel(created_file_name, index=False)
-        print_in_list_box(created_file_name)
+        # ui.data.real_monday_name
+        ui.data.df_monday_view.to_excel(ui.data.real_monday_name, index=False)
+        print_in_list_box(ui.data.real_monday_name)
 
         sub_time = time.time() - start
         print('월요일 조회수 총 실행 시간: %s 초' % sub_time)
@@ -590,12 +591,14 @@ def start_program():
             ui.radio_live.config(state='disabled')
             ui.radio_monday.config(state='disabled')
 
-            run_thread = threading.Thread(target=run())
+            run_thread = threading.Timer(1, run)
+            # run_thread = threading.Thread(target=run())
             run_thread.daemon = True
 
             # 근데 왜 처음 모니터링 부분에서 로딩이 길지 => 1초 정도 차이를 두고 2개의 스레드 실행으로 해결
             # 다른 문제점: 스타트 클릭했을 때만 동작을 하고 스탑 버튼을 클릭했을 때 멈추게 할지
-            monitoring_thread = threading.Timer(1, monitoring)
+            # monitoring_thread = threading.Timer(1, monitoring)
+            monitoring_thread = threading.Timer(0, monitoring)
             monitoring_thread.daemon = True
 
             monitoring_thread.start()
@@ -607,7 +610,7 @@ def start_program():
         else:
             # 월요일 조회수 폴더가 있는지 확인
             ui.data.real_monday_path = ui.data.result_path + ui.data.slash + ui.data.result_monday_path
-            ui.data.real_monday_name = ui.data.real_monday_path + ui.data.slash + ui.data.today + '_월요일'
+            # ui.data.real_monday_name = ui.data.real_monday_path + ui.data.slash + ui.data.today + '_월요일'
             if not os.path.exists(ui.data.real_monday_path):
                 os.makedirs(ui.data.real_monday_path)
             # 입력으로 실시간 시청자 수 마지막 엑셀을 넣어주자
@@ -640,16 +643,25 @@ def start_program():
             if now.weekday() != 0:
                 to_str = str(monday.year) + '-' + str(monday.month) + '-' + str(monday.day)
                 monday = datetime.strptime(to_str, '%Y-%m-%d')
-                # monday = datetime.strptime('2023-1-11 18:10', '%Y-%m-%d %H:%M')
+                # monday = datetime.strptime('2023-1-17 15:11', '%Y-%m-%d %H:%M')
                 sub_day = monday - now
                 wait_msg = '월요일 조회수 데이터 수집 시작까지 '
+                if 'days' in str(sub_day):
+                    sub_day_left = int(str(sub_day)[:str(sub_day).find(' ')])
+                    sub_day_left = sub_day_left * 24 * 60 * 60
+                else:
+                    sub_day_left = 0
                 wait_msg = wait_msg + str(sub_day).split('.')[0].replace(' days', '일').replace(',', '')
                 wait_msg = wait_msg.replace(':', '시간 ', 1)
                 wait_msg = wait_msg.replace(':', '분 ') + '초 남았습니다.'
                 print_in_list_box(wait_msg)
-                ui.data.monday_thread = threading.Timer(sub_day.seconds, monday_view)
+                print(sub_day.seconds)
+                print(sub_day_left)
+                sub_day_second = sub_day.seconds + sub_day_left
+                print(sub_day_second)
+                ui.data.monday_thread = threading.Timer(sub_day_second, monday_view)
             else:
-                ui.button_stop.config(state='disabled')
+                # ui.button_stop.config(state='disabled')
                 ui.data.monday_thread = threading.Timer(0, monday_view)
             ui.data.monday_thread.daemon = True
             ui.data.monday_thread.start()
@@ -846,7 +858,7 @@ def comments(flag):
         he.title("프로그램 시작 전 필수")
         text = '\
 [프로그램 시작 전 필수]\n\n\
-1. 집계 프로그램.exe, 필수_실시간.xlsx, 필수_조회수+좋아요.xlsx 세 가지 파일들은 반드시 같은 폴더에 있어야 합니다.\n\n\
+1. 집계 프로그램.exe, 필수_실시간.xlsx, 필수_조회수+좋아요.xlsx, 필수_월요일_조회수.xlsx 네 가지 파일들은 반드시 같은 폴더에 있어야 합니다.\n\n\
 2. 채널 엑셀 파일에 필요한 요소\n\
 - 첫 번째 행에서 첫 번째 열에는 "채널 이름"이, 두 번째 열에는 "실시간 주소"가 고정되어 있어야 합니다.\n\
 - 추가하려는 "채널 이름"과 "실시간 주소"를 짝을 맞춰서 저장해 주세요.\n\
@@ -880,7 +892,7 @@ ex) 채널 이름=뭉치의 개팔상팔, 실시간 주소=https://www.youtube.c
         text = '["월요일 조회수" 선택 시]\n\n\
 1. 실시간 또는 조회수+좋아요 엑셀 파일 내 영상들의 월요일 조회 수를 저장합니다.\n\n\
 2. 실행 과정 및 결과\n\
-- "실시간 시청자 수"엑셀 또는 "조회수+좋아요"엑셀 파일을 찾아 선택하고 시작 버튼을 눌러 주세요.\n\
+- 최종 "실시간 시청자 수"엑셀 또는 최종 "조회수+좋아요"엑셀 파일을 찾아 선택하고 시작 버튼을 눌러 주세요.\n\
 - 시작 버튼을 눌렀을 시점의 요일이 월요일이 아니면 월요일 0시 0분 0초가 될 때까지 기다렸다가 자동으로 데이터 수집이 시작됩니다.\n\
 - 시작 버튼을 눌렀을 시점의 요일이 월요일이라면 바로 그 시간의 데이터가 수집됩니다.\n\n\
 3. 생성된 엑셀 저장 위치\n\
